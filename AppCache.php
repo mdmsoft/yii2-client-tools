@@ -5,7 +5,6 @@ namespace mdm\clienttools;
 use \Yii;
 use yii\web\View;
 use yii\helpers\FileHelper;
-use yii\caching\FileCache;
 
 /**
  * Description of AppCache
@@ -14,19 +13,10 @@ use yii\caching\FileCache;
  */
 class AppCache extends \yii\base\ActionFilter
 {
-    public $extra_caches = [];
+    public $extraCaches = [];
     public $actions = [];
     private $_manifest_file;
-    private $_cache;
-
-    public function init()
-    {
-        parent::init();
-        $this->_cache = Yii::$app->getCache();
-        if ($this->_cache === null) {
-            $this->_cache = new FileCache();
-        }
-    }
+    public $rel = true;
 
     /**
      * @inheritdoc
@@ -34,69 +24,8 @@ class AppCache extends \yii\base\ActionFilter
     public function beforeAction($action)
     {
         $view = $action->controller->view;
-        $id = $action->uniqueId;
-        $view->on(View::EVENT_END_PAGE, [$this, 'createManifest'], $id);
-        $view->on(View::EVENT_END_BODY, [$this, 'swapCache']);
-        $this->_manifest_file = static::getFileName($id, true);
-        return true;
-    }
-
-    /**
-     * @inheritdoc
-     */
-    public function afterAction($action, $result)
-    {
-        $view = $action->controller->view;
-        $view->off(View::EVENT_END_PAGE, [$this, 'createManifest']);
-        $view->off(View::EVENT_END_BODY, [$this, 'swapCache']);
-        $this->_manifest_file = null;
-        $id = $action->uniqueId;
-        if (!file_exists(static::getFileName($id))) {
-            static::invalidate($id);
-        }
-        return $result;
-    }
-
-    /**
-     * @inheritdoc
-     */
-    protected function isActive($action)
-    {
-        return in_array($action->id, $this->actions, true);
-    }
-
-    private static function getFileName($id, $url = false)
-    {
-        $key = static::buildKey($id);
-        return Yii::getAlias(($url ? '@web' : '@webroot') . "/assets/manifest/{$key}.manifest");
-    }
-
-    private static function buildKey($id)
-    {
-        return md5(serialize([
-            __CLASS__,
-            $id
-        ]));
-    }
-
-    public static function invalidate($id)
-    {
-        $key = static::buildKey($id);
-        if (($caches = $this->_cache->get($key)) !== false) {
-            $view = new View();
-            $file = Yii::getAlias('@mdm/clienttools/manifest.php');
-            $manifest = $view->renderPhpFile($file, ['caches' => $caches]);
-            $filename = static::getFileName($id);
-            FileHelper::createDirectory(dirname($filename));
-            file_put_contents($filename, $manifest);
-        }
-    }
-
-    public function swapCache($event)
-    {
         $js = <<<JS
 if (window.applicationCache) {
-	window.applicationCache.update();
 	window.applicationCache.addEventListener('updateready', function(e) {
 		if (window.applicationCache.status == window.applicationCache.UPDATEREADY) {
 			window.applicationCache.swapCache();
@@ -105,46 +34,136 @@ if (window.applicationCache) {
 	}, false);
 }
 JS;
-        $event->sender->registerJs($js, View::POS_BEGIN);
+        $view->registerJs($js, View::POS_BEGIN);
+        $this->_manifest_file = static::getFileName($action->uniqueId, true, $this->rel);
+        return true;
     }
 
     /**
-     * 
-     * @param \yii\base\Event $event
+     * @inheritdoc
      */
-    public function createManifest($event)
+    public function afterAction($action, $result)
+    {
+        $this->createManifest($action->uniqueId, $result);
+        return $result;
+    }
+
+    protected function createManifest($id, $html)
     {
         try {
-            $key = static::buildKey($event->data);
-            if (($this->_cache->get($key) === false or (defined('YII_ENV') && YII_ENV === 'dev'))) {
-                $view = $event->sender;
-                $html = '<html>';
-                foreach ($view->jsFiles as $jsFiles) {
-                    $html.="\n" . implode("\n", $jsFiles);
-                }
-                $html.="\n" . implode("\n", $view->cssFiles);
-                $html.="\n</html>";
-
+            $filename = $this->getFileName($id);
+            if (@file_get_contents($filename) == false) {
                 $caches = [];
-                $dom = new \DOMDocument();
-                $dom->loadHTML($html);
-                foreach ($dom->getElementsByTagName('script') as $script) {
-                    $caches[] = $script->getAttribute('src');
-                }
-                foreach ($dom->getElementsByTagName('link') as $style) {
-                    $caches[] = $style->getAttribute('href');
-                }
-                $caches = array_merge($caches, $this->extra_caches);
+                $paths = [];
+                $baseUrl = Yii::getAlias('@web') . '/';
+                $basePath = Yii::getAlias('@webroot') . '/';
 
-                $this->_cache->set($key, $caches);
+                // css
+                $matches = [];
+                $pattern = '/<link [^>]*href="?([^">]+)"?/';
+                preg_match_all($pattern, $html, $matches);
+                if (isset($matches[1])) {
+                    foreach ($matches[1] as $href) {
+                        $caches[$href] = true;
+                        if (($path = $this->convertUrlToPath($href, $basePath, $baseUrl)) !== false) {
+                            $path = dirname($path);
+                            if (!isset($paths[$path]) && is_dir($path)) {
+                                $paths[$path] = true;
+                                foreach (FileHelper::findFiles($path) as $file) {
+                                    $caches[$this->convertPathToUrl($file, $basePath, $baseUrl)] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // js
+                $matches = [];
+                $pattern = '/<script [^>]*src="?([^">]+)"?/';
+                preg_match_all($pattern, $html, $matches);
+                if (isset($matches[1])) {
+                    foreach ($matches[1] as $src) {
+                        $caches[$src] = true;
+                    }
+                }
+
+                // img
+                $matches = [];
+                $pattern = '/<img [^>]*src="?([^">]+)"?/';
+                preg_match_all($pattern, $html, $matches);
+                if (isset($matches[1])) {
+                    foreach ($matches[1] as $src) {
+                        if (strpos($src, 'data:') !== 0) {
+                            $caches[$src] = true;
+                        }
+                    }
+                }
+                unset($caches[false]);
+
+                $data = array_keys($caches);
+                if ($this->rel) {
+                    $l = strlen($baseUrl);
+                    foreach ($data as $key => $url) {
+                        if (strpos($url, $baseUrl) === 0) {
+                            $data[$key] = substr($url, $l);
+                        }
+                    }
+                }
+                $view = new View();
+                $manifest = $view->renderPhpFile(Yii::getAlias('@mdm/clienttools/manifest.php'), [
+                    'caches' => array_merge($data, $this->extraCaches)
+                ]);
+                FileHelper::createDirectory(dirname($filename));
+                file_put_contents($filename, $manifest);
             }
         } catch (\Exception $exc) {
-            
+            \Yii::error($exc->getMessage());
+        }
+    }
+
+    private function convertPathToUrl($path, $basePath, $baseUrl)
+    {
+        if ($baseUrl && $basePath && strpos($path, $basePath) === 0) {
+            return $baseUrl . substr($path, strlen($basePath));
+        }
+        return false;
+    }
+
+    private function convertUrlToPath($url, $basePath, $baseUrl)
+    {
+        if ($baseUrl && $basePath && strpos($url, $baseUrl) === 0) {
+            return $basePath . substr($url, strlen($baseUrl));
+        }
+        return false;
+    }
+
+    private static function getFileName($id, $url = false, $rel = true)
+    {
+        $key = sprintf('%x', crc32($id . __CLASS__));
+        if ($url) {
+            return ($rel ? '' : Yii::getAlias('@web') . '/') . "{$key}.manifest";
+        } else {
+            return Yii::getAlias("@webroot/{$key}.manifest");
+        }
+    }
+
+    public static function invalidate($id)
+    {
+        $filename = static::getFileName($id);
+        if (($content = @file_get_contents($filename)) !== false) {
+            $lines = explode("\n", $content);
+            $lines[1] = '#' . time();
+            file_put_contents($filename, implode("\n", $lines));
         }
     }
 
     public function getManifestFile()
     {
         return $this->_manifest_file;
+    }
+
+    protected function isActive($action)
+    {
+        return in_array($action->id, $this->actions, true);
     }
 }
