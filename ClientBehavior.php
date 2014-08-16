@@ -15,15 +15,22 @@ use yii\base\InvalidCallException;
  */
 class ClientBehavior extends \yii\base\Behavior
 {
-    const COOKIE_KEY = '_client_identity';
-
-    private $_clientId;
+    /**
+     *
+     * @var integer 
+     */
     public $expire = 31536000; // default 1 year
+    /**
+     *
+     * @var string 
+     */
+    public $cookieKey = '_client_identity';
+    private $_clientId;
 
     public function init()
     {
         parent::init();
-        $cookie = Yii::$app->getRequest()->cookies->get(static::COOKIE_KEY);
+        $cookie = Yii::$app->getRequest()->cookies->get($this->cookieKey);
         if ($cookie) {
             $this->_clientId = $cookie->value;
         } else {
@@ -33,7 +40,7 @@ class ClientBehavior extends \yii\base\Behavior
             }
             $this->_clientId = md5($str . ':' . microtime(true));
             $cookie = new Cookie();
-            $cookie->name = static::COOKIE_KEY;
+            $cookie->name = $this->cookieKey;
             $cookie->value = $this->_clientId;
         }
         $cookie->expire = time() + $this->expire;
