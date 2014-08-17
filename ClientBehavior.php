@@ -10,19 +10,19 @@ use yii\base\InvalidCallException;
  * Description of ClientBehavior
  *
  * @property string $clientId
- * 
+ *
  * @author MDMunir <misbahuldmunir@gmail.com>
  */
 class ClientBehavior extends \yii\base\Behavior
 {
     /**
      *
-     * @var integer 
+     * @var integer
      */
     public $expire = 31536000; // default 1 year
     /**
      *
-     * @var string 
+     * @var string
      */
     public $cookieKey = '_client_identity';
     private $_clientId;
@@ -137,8 +137,10 @@ class ClientBehavior extends \yii\base\Behavior
     {
         if (($cache = Yii::$app->cache) !== null) {
             $result = $cache->get($this->buildKey($key));
+
             return $result === false ? null : $result;
         }
+
         return null;
     }
 }

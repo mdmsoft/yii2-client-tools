@@ -17,6 +17,7 @@ class CheckReload
     {
         $session = \Yii::$app->getSession();
         $session[static::TOKEN_NAME] = $value = md5(microtime(true) . mt_rand(0, 1000));
+
         return Html::tag('div', Html::hiddenInput(static::TOKEN_NAME, $value, ['id' => false]), ['style' => 'display:none;']);
     }
 
@@ -26,6 +27,7 @@ class CheckReload
         $token = \Yii::$app->getRequest()->post(static::TOKEN_NAME);
         $value = $session->get(static::TOKEN_NAME);
         $session->set(static::TOKEN_NAME, md5(time() . static::TOKEN_NAME));
+
         return $token === $value;
     }
 }

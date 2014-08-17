@@ -26,7 +26,7 @@ class AppCache extends \yii\base\ActionFilter
         $view = $action->controller->view;
         $js = <<<JS
 if (window.applicationCache) {
-	window.applicationCache.addEventListener('updateready', function(e) {
+	window.applicationCache.addEventListener('updateready', function (e) {
 		if (window.applicationCache.status == window.applicationCache.UPDATEREADY) {
 			window.applicationCache.swapCache();
 			//window.location.reload();
@@ -36,6 +36,7 @@ if (window.applicationCache) {
 JS;
         $view->registerJs($js, View::POS_BEGIN);
         $this->_manifest_file = static::getFileName($action->uniqueId, true, $this->rel);
+
         return true;
     }
 
@@ -45,6 +46,7 @@ JS;
     public function afterAction($action, $result)
     {
         $this->createManifest($action->uniqueId, $result);
+
         return $result;
     }
 
@@ -126,6 +128,7 @@ JS;
         if ($baseUrl && $basePath && strpos($path, $basePath) === 0) {
             return $baseUrl . substr($path, strlen($basePath));
         }
+
         return false;
     }
 
@@ -134,6 +137,7 @@ JS;
         if ($baseUrl && $basePath && strpos($url, $baseUrl) === 0) {
             return $basePath . substr($url, strlen($baseUrl));
         }
+
         return false;
     }
 
